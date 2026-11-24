@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF Viewer</title>
+    <!-- PDF.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <!-- 텍스트 선택(드래그) 레이어용 CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf_viewer.min.css" />
+    <style>
+        :root {
+            --bg-color: #121212;
+            --toolbar-bg: #1e1e1e;
+            --border-color: #333333;
+            --text-color: #e0e0e0;
+            --accent-color: #4dabf7;
+            --btn-hover: #2c2c2c;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Consolas', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 상단 툴바 */
+        header {
+            background-color: var(--toolbar-bg);
+            border-bottom: 1px solid var(--border-color);
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            z-index: 10;
+        }
+
+        .toolbar-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #file-name {
+            font-size: 0.9rem;
+            font-weight: 600;
+            max-width: 260px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #ffffff;
+        }
+
+        button,
+        label.btn {
+            background-color: transparent;
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: background-color 0.15s, border-color 0.15s;
+            user-select: none;
+        }
+
+        button:hover:not(:disabled),
+        label.btn:hover {
+            background-color: var(--btn-hover);
+            border-color: #555;
+        }
+
+        button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        input[type="number"] {
+            background-color: #121212;
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 4px 6px;
+            width: 55px;
+            text-align: center;
+            font-size: 0.85rem;
+        }
+
+        .page-info,
+        .zoom-info {
+            font-size: 0.85rem;
+            color: #aaa;
+        }
+
+        /* 뷰어 메인 영역 */
+        main {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 24px 16px;
+            gap: 20px;
+            position: relative;
+        }
+
+        /* 개별 PDF 페이지 래퍼 */
+        .pdf-page-container {
+            position: relative;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+            background-color: #ffffff;
+        }
+
+        .pdf-page-container canvas {
+            display: block;
+        }
+
+        /* 상태 메시지 (로딩 / 에러 / 안내) */
+        #status-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #888;
+            line-height: 1.6;
+        }
+
+        #status-message code {
+            background: #1e1e1e;
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: var(--accent-color);
+        }
+
+        /* 드래그 앤 드롭 오버레이 */
+        body.drag-over::after {
+            content: "여기에 PDF 파일을 놓으세요";
+            position: fixed;
+            inset: 12px;
+            background: rgba(18, 18, 18, 0.85);
+            border: 2px dashed var(--accent-color);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            color: var(--accent-color);
+            z-index: 100;
+            pointer-events: none;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <div class="toolbar-group">
+            <!-- <label class="btn" for="file-input">파일 열기</label>
+            <input type="file" id="file-input" accept="application/pdf" />
+            <span id="file-name" title="파일명">문서 없음</span> -->
+        </div>
+
+        <div class="toolbar-group">
+            <button id="prev-page" disabled>이전</button>
+            <input type="number" id="page-num" value="1" min="1" disabled />
+            <span class="page-info">/ <span id="page-count">0</span></span>
+            <button id="next-page" disabled>다음</button>
+        </div>
+
+        <div class="toolbar-group">
+            <button id="zoom-out" disabled>-</button>
+            <span class="zoom-info" id="zoom-level">100%</span>
+            <button id="zoom-in" disabled>+</button>
+            <button id="fit-width" disabled>너비 맞춤</button>
+        </div>
+    </header>
+
+    <main id="viewer-container">
+        <div id="status-message">
+            <p>URL 파라미터로 PDF 경로를 지정하거나 파일을 열어주세요.</p>
+            <p style="margin-top: 8px; font-size: 0.85rem;">
+                예시: <code>?path=/.pdf/sample.pdf</code> 또는 화면에 PDF 드래그 앤 드롭
+            </p>
+        </div>
+    </main>
+
+    <script>
+        // PDF.js 워커 설정
+        const pdfjsLib = window['pdfjs-dist/build/pdf'];
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        let pdfDoc = null;
+        let currentScale = 1.2;
+        let isRendering = false;
+
+        const viewerContainer = document.getElementById('viewer-container');
+        const statusMessage = document.getElementById('status-message');
+        const fileNameEl = document.getElementById('file-name');
+        const pageNumInput = document.getElementById('page-num');
+        const pageCountEl = document.getElementById('page-count');
+        const zoomLevelEl = document.getElementById('zoom-level');
+
+        const prevBtn = document.getElementById('prev-page');
+        const nextBtn = document.getElementById('next-page');
+        const zoomInBtn = document.getElementById('zoom-in');
+        const zoomOutBtn = document.getElementById('zoom-out');
+        const fitWidthBtn = document.getElementById('fit-width');
+        const fileInput = document.getElementById('file-input');
+
+        // URL 쿼리 파라미터에서 path 추출 (?path=... 또는 ?file=...)
+        function getPdfPathFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('path') || params.get('file') || params.get('url');
+        }
+
+        // UI 활성화
+        function enableControls(totalPages) {
+            pageCountEl.textContent = totalPages;
+            pageNumInput.max = totalPages;
+            pageNumInput.disabled = false;
+            prevBtn.disabled = false;
+            nextBtn.disabled = false;
+            zoomInBtn.disabled = false;
+            zoomOutBtn.disabled = false;
+            fitWidthBtn.disabled = false;
+        }
+
+        // 모든 페이지 렌더링 (스크롤 방식)
+        async function renderAllPages() {
+            if (!pdfDoc || isRendering) return;
+            isRendering = true;
+
+            viewerContainer.innerHTML = '';
+            zoomLevelEl.textContent = `${Math.round(currentScale * 100)}%`;
+
+            const outputScale = window.devicePixelRatio || 1;
+
+            for (let num = 1; num <= pdfDoc.numPages; num++) {
+                const page = await pdfDoc.getPage(num);
+                const viewport = page.getViewport({ scale: currentScale });
+
+                // 페이지 컨테이너 생성
+                const pageContainer = document.createElement('div');
+                pageContainer.className = 'pdf-page-container';
+                pageContainer.dataset.pageNumber = num;
+                pageContainer.style.width = `${viewport.width}px`;
+                pageContainer.style.height = `${viewport.height}px`;
+
+                // 캔버스 생성 (고해상도 DPI 대응)
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = Math.floor(viewport.width * outputScale);
+                canvas.height = Math.floor(viewport.height * outputScale);
+                canvas.style.width = `${viewport.width}px`;
+                canvas.style.height = `${viewport.height}px`;
+
+                const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
+
+                // 텍스트 선택 레이어 생성
+                const textLayerDiv = document.createElement('div');
+                textLayerDiv.className = 'textLayer';
+                textLayerDiv.style.width = `${viewport.width}px`;
+                textLayerDiv.style.height = `${viewport.height}px`;
+                textLayerDiv.style.setProperty('--scale-factor', currentScale);
+
+                pageContainer.appendChild(canvas);
+                pageContainer.appendChild(textLayerDiv);
+                viewerContainer.appendChild(pageContainer);
+
+                // 캔버스 렌더링
+                await page.render({
+                    canvasContext: ctx,
+                    transform: transform,
+                    viewport: viewport
+                }).promise;
+
+                // 텍스트 레이어 렌더링
+                const textContent = await page.getTextContent();
+                pdfjsLib.renderTextLayer({
+                    textContentSource: textContent,
+                    container: textLayerDiv,
+                    viewport: viewport,
+                    textDivs: []
+                });
+            }
+
+            isRendering = false;
+        }
+
+        // PDF 로드 함수 (URL 또는 ArrayBuffer)
+        async function loadPdf(source, displayName) {
+            try {
+                statusMessage.style.display = 'block';
+                statusMessage.innerHTML = '<p>PDF 문서를 불러오는 중입니다...</p>';
+                fileNameEl.textContent = displayName;
+                fileNameEl.title = displayName;
+                document.title = `${displayName} - PDF Viewer`;
+
+                const loadingTask = pdfjsLib.getDocument(source);
+                pdfDoc = await loadingTask.promise;
+
+                statusMessage.style.display = 'none';
+                enableControls(pdfDoc.numPages);
+                await renderAllPages();
+            } catch (err) {
+                console.error(err);
+                statusMessage.style.display = 'block';
+                statusMessage.innerHTML = `
+          <p style="color: #ff6b6b;">PDF를 불러오는 데 실패했습니다.</p>
+          <p style="font-size: 0.85rem; margin-top: 6px;">경로가 올바른지 또는 CORS 정책을 확인해주세요.<br>(${err.message})</p>
+        `;
+            }
+        }
+
+        // 특정 페이지로 스크롤 이동
+        function scrollToPage(num) {
+            const target = viewerContainer.querySelector(`.pdf-page-container[data-page-number="${num}"]`);
+            if (target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                pageNumInput.value = num;
+            }
+        }
+
+        // 스크롤 시 현재 페이지 번호 자동 업데이트
+        viewerContainer.addEventListener('scroll', () => {
+            const pages = document.querySelectorAll('.pdf-page-container');
+            const containerTop = viewerContainer.getBoundingClientRect().top;
+
+            for (const page of pages) {
+                const rect = page.getBoundingClientRect();
+                if (rect.top <= containerTop + 150 && rect.bottom >= containerTop + 150) {
+                    pageNumInput.value = page.dataset.pageNumber;
+                    break;
+                }
+            }
+        });
+
+        // 버튼 이벤트 바인딩
+        prevBtn.addEventListener('click', () => {
+            const current = parseInt(pageNumInput.value, 10);
+            if (current > 1) scrollToPage(current - 1);
+        });
+
+        nextBtn.addEventListener('click', () => {
+            const current = parseInt(pageNumInput.value, 10);
+            if (pdfDoc && current < pdfDoc.numPages) scrollToPage(current + 1);
+        });
+
+        pageNumInput.addEventListener('change', () => {
+            if (!pdfDoc) return;
+            let val = parseInt(pageNumInput.value, 10);
+            if (isNaN(val) || val < 1) val = 1;
+            if (val > pdfDoc.numPages) val = pdfDoc.numPages;
+            scrollToPage(val);
+        });
+
+        zoomInBtn.addEventListener('click', () => {
+            if (currentScale >= 3.0) return;
+            currentScale = +(currentScale + 0.2).toFixed(2);
+            renderAllPages();
+        });
+
+        zoomOutBtn.addEventListener('click', () => {
+            if (currentScale <= 0.4) return;
+            currentScale = +(currentScale - 0.2).toFixed(2);
+            renderAllPages();
+        });
+
+        fitWidthBtn.addEventListener('click', async () => {
+            if (!pdfDoc) return;
+            const page = await pdfDoc.getPage(1);
+            const unscaledViewport = page.getViewport({ scale: 1 });
+            const availableWidth = viewerContainer.clientWidth - 48;
+            currentScale = +(availableWidth / unscaledViewport.width).toFixed(2);
+            renderAllPages();
+        });
+
+        // 로컬 파일 선택
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function () {
+                const typedarray = new Uint8Array(this.result);
+                loadPdf(typedarray, file.name);
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        // 드래그 앤 드롭 지원
+        window.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            document.body.classList.add('drag-over');
+        });
+
+        window.addEventListener('dragleave', (e) => {
+            if (e.relatedTarget === null) {
+                document.body.classList.remove('drag-over');
+            }
+        });
+
+        window.addEventListener('drop', (e) => {
+            e.preventDefault();
+            document.body.classList.remove('drag-over');
+            const file = e.dataTransfer.files[0];
+            if (file && file.type === 'application/pdf') {
+                const reader = new FileReader();
+                reader.onload = function () {
+                    const typedarray = new Uint8Array(this.result);
+                    loadPdf(typedarray, file.name);
+                };
+                reader.readAsArrayBuffer(file);
+            }
+        });
+
+        // 초기 실행: URL 쿼리 파라미터 확인
+        window.addEventListener('DOMContentLoaded', () => {
+            const pdfPath = getPdfPathFromUrl();
+            if (pdfPath) {
+                const name = pdfPath.split('/').pop().split('?')[0] || 'document.pdf';
+                loadPdf(pdfPath, decodeURIComponent(name));
+            }
+        });
+    </script>
+</body>
+
+</html>
