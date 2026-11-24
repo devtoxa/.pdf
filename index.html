@@ -5,9 +5,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PDF Viewer</title>
-    <!-- PDF.js CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <!-- 텍스트 선택(드래그) 레이어용 CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf_viewer.min.css" />
     <style>
         :root {
@@ -35,7 +33,6 @@
             overflow: hidden;
         }
 
-        /* 상단 툴바 */
         header {
             background-color: var(--toolbar-bg);
             border-bottom: 1px solid var(--border-color);
@@ -57,15 +54,14 @@
         #file-name {
             font-size: 0.9rem;
             font-weight: 600;
-            max-width: 260px;
+            max-width: 300px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
             color: #ffffff;
         }
 
-        button,
-        label.btn {
+        button {
             background-color: transparent;
             color: var(--text-color);
             border: 1px solid var(--border-color);
@@ -77,8 +73,7 @@
             user-select: none;
         }
 
-        button:hover:not(:disabled),
-        label.btn:hover {
+        button:hover:not(:disabled) {
             background-color: var(--btn-hover);
             border-color: #555;
         }
@@ -86,10 +81,6 @@
         button:disabled {
             opacity: 0.4;
             cursor: not-allowed;
-        }
-
-        input[type="file"] {
-            display: none;
         }
 
         input[type="number"] {
@@ -109,11 +100,9 @@
             color: #aaa;
         }
 
-        /* 뷰어 메인 영역 */
         main {
             flex: 1;
-            overflow-y: auto;
-            overflow-x: auto;
+            overflow: auto;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -122,7 +111,6 @@
             position: relative;
         }
 
-        /* 개별 PDF 페이지 래퍼 */
         .pdf-page-container {
             position: relative;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
@@ -133,7 +121,6 @@
             display: block;
         }
 
-        /* 상태 메시지 (로딩 / 에러 / 안내) */
         #status-message {
             position: absolute;
             top: 50%;
@@ -150,23 +137,6 @@
             border-radius: 4px;
             color: var(--accent-color);
         }
-
-        /* 드래그 앤 드롭 오버레이 */
-        body.drag-over::after {
-            content: "여기에 PDF 파일을 놓으세요";
-            position: fixed;
-            inset: 12px;
-            background: rgba(18, 18, 18, 0.85);
-            border: 2px dashed var(--accent-color);
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.2rem;
-            color: var(--accent-color);
-            z-index: 100;
-            pointer-events: none;
-        }
     </style>
 </head>
 
@@ -174,9 +144,7 @@
 
     <header>
         <div class="toolbar-group">
-            <!-- <label class="btn" for="file-input">파일 열기</label>
-            <input type="file" id="file-input" accept="application/pdf" />
-            <span id="file-name" title="파일명">문서 없음</span> -->
+            <span id="file-name" title="파일명">path 미지정</span>
         </div>
 
         <div class="toolbar-group">
@@ -188,7 +156,7 @@
 
         <div class="toolbar-group">
             <button id="zoom-out" disabled>-</button>
-            <span class="zoom-info" id="zoom-level">100%</span>
+            <span class="zoom-info" id="zoom-level">120%</span>
             <button id="zoom-in" disabled>+</button>
             <button id="fit-width" disabled>너비 맞춤</button>
         </div>
@@ -196,15 +164,14 @@
 
     <main id="viewer-container">
         <div id="status-message">
-            <p>URL 파라미터로 PDF 경로를 지정하거나 파일을 열어주세요.</p>
+            <p>URL에 <code>?path=...</code> 파라미터를 지정해주세요.</p>
             <p style="margin-top: 8px; font-size: 0.85rem;">
-                예시: <code>?path=/.pdf/sample.pdf</code> 또는 화면에 PDF 드래그 앤 드롭
+                예시: <code>?path=/.pdf/sample.pdf</code>
             </p>
         </div>
     </main>
 
     <script>
-        // PDF.js 워커 설정
         const pdfjsLib = window['pdfjs-dist/build/pdf'];
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
@@ -224,15 +191,12 @@
         const zoomInBtn = document.getElementById('zoom-in');
         const zoomOutBtn = document.getElementById('zoom-out');
         const fitWidthBtn = document.getElementById('fit-width');
-        const fileInput = document.getElementById('file-input');
 
-        // URL 쿼리 파라미터에서 path 추출 (?path=... 또는 ?file=...)
-        function getPdfPathFromUrl() {
+        function getPathParam() {
             const params = new URLSearchParams(window.location.search);
-            return params.get('path') || params.get('file') || params.get('url');
+            return params.get('path');
         }
 
-        // UI 활성화
         function enableControls(totalPages) {
             pageCountEl.textContent = totalPages;
             pageNumInput.max = totalPages;
@@ -244,7 +208,6 @@
             fitWidthBtn.disabled = false;
         }
 
-        // 모든 페이지 렌더링 (스크롤 방식)
         async function renderAllPages() {
             if (!pdfDoc || isRendering) return;
             isRendering = true;
@@ -258,14 +221,12 @@
                 const page = await pdfDoc.getPage(num);
                 const viewport = page.getViewport({ scale: currentScale });
 
-                // 페이지 컨테이너 생성
                 const pageContainer = document.createElement('div');
                 pageContainer.className = 'pdf-page-container';
                 pageContainer.dataset.pageNumber = num;
                 pageContainer.style.width = `${viewport.width}px`;
                 pageContainer.style.height = `${viewport.height}px`;
 
-                // 캔버스 생성 (고해상도 DPI 대응)
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
                 canvas.width = Math.floor(viewport.width * outputScale);
@@ -275,7 +236,6 @@
 
                 const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
 
-                // 텍스트 선택 레이어 생성
                 const textLayerDiv = document.createElement('div');
                 textLayerDiv.className = 'textLayer';
                 textLayerDiv.style.width = `${viewport.width}px`;
@@ -286,14 +246,12 @@
                 pageContainer.appendChild(textLayerDiv);
                 viewerContainer.appendChild(pageContainer);
 
-                // 캔버스 렌더링
                 await page.render({
                     canvasContext: ctx,
                     transform: transform,
                     viewport: viewport
                 }).promise;
 
-                // 텍스트 레이어 렌더링
                 const textContent = await page.getTextContent();
                 pdfjsLib.renderTextLayer({
                     textContentSource: textContent,
@@ -306,16 +264,16 @@
             isRendering = false;
         }
 
-        // PDF 로드 함수 (URL 또는 ArrayBuffer)
-        async function loadPdf(source, displayName) {
+        async function loadPdfFromPath(pdfPath) {
+            const displayName = decodeURIComponent(pdfPath.split('/').pop().split('?')[0] || 'document.pdf');
             try {
                 statusMessage.style.display = 'block';
                 statusMessage.innerHTML = '<p>PDF 문서를 불러오는 중입니다...</p>';
                 fileNameEl.textContent = displayName;
-                fileNameEl.title = displayName;
+                fileNameEl.title = pdfPath;
                 document.title = `${displayName} - PDF Viewer`;
 
-                const loadingTask = pdfjsLib.getDocument(source);
+                const loadingTask = pdfjsLib.getDocument(pdfPath);
                 pdfDoc = await loadingTask.promise;
 
                 statusMessage.style.display = 'none';
@@ -326,12 +284,11 @@
                 statusMessage.style.display = 'block';
                 statusMessage.innerHTML = `
           <p style="color: #ff6b6b;">PDF를 불러오는 데 실패했습니다.</p>
-          <p style="font-size: 0.85rem; margin-top: 6px;">경로가 올바른지 또는 CORS 정책을 확인해주세요.<br>(${err.message})</p>
+          <p style="font-size: 0.85rem; margin-top: 6px;"><code>${pdfPath}</code> 경로를 확인해주세요.<br>(${err.message})</p>
         `;
             }
         }
 
-        // 특정 페이지로 스크롤 이동
         function scrollToPage(num) {
             const target = viewerContainer.querySelector(`.pdf-page-container[data-page-number="${num}"]`);
             if (target) {
@@ -340,7 +297,6 @@
             }
         }
 
-        // 스크롤 시 현재 페이지 번호 자동 업데이트
         viewerContainer.addEventListener('scroll', () => {
             const pages = document.querySelectorAll('.pdf-page-container');
             const containerTop = viewerContainer.getBoundingClientRect().top;
@@ -354,7 +310,6 @@
             }
         });
 
-        // 버튼 이벤트 바인딩
         prevBtn.addEventListener('click', () => {
             const current = parseInt(pageNumInput.value, 10);
             if (current > 1) scrollToPage(current - 1);
@@ -394,50 +349,10 @@
             renderAllPages();
         });
 
-        // 로컬 파일 선택
-        fileInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = function () {
-                const typedarray = new Uint8Array(this.result);
-                loadPdf(typedarray, file.name);
-            };
-            reader.readAsArrayBuffer(file);
-        });
-
-        // 드래그 앤 드롭 지원
-        window.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            document.body.classList.add('drag-over');
-        });
-
-        window.addEventListener('dragleave', (e) => {
-            if (e.relatedTarget === null) {
-                document.body.classList.remove('drag-over');
-            }
-        });
-
-        window.addEventListener('drop', (e) => {
-            e.preventDefault();
-            document.body.classList.remove('drag-over');
-            const file = e.dataTransfer.files[0];
-            if (file && file.type === 'application/pdf') {
-                const reader = new FileReader();
-                reader.onload = function () {
-                    const typedarray = new Uint8Array(this.result);
-                    loadPdf(typedarray, file.name);
-                };
-                reader.readAsArrayBuffer(file);
-            }
-        });
-
-        // 초기 실행: URL 쿼리 파라미터 확인
         window.addEventListener('DOMContentLoaded', () => {
-            const pdfPath = getPdfPathFromUrl();
+            const pdfPath = getPathParam();
             if (pdfPath) {
-                const name = pdfPath.split('/').pop().split('?')[0] || 'document.pdf';
-                loadPdf(pdfPath, decodeURIComponent(name));
+                loadPdfFromPath(pdfPath);
             }
         });
     </script>
